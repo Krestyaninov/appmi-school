@@ -1,0 +1,907 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+  <meta name="description" content="AppMi — Тренажёр для менеджеров по роботам-пылесосам: Dreame, Roborock, Dyson"/>
+  <title>AppMi — Тренажёр: Роботы-пылесосы</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<!-- ═══ HEADER ═══ -->
+<header class="header">
+  <div class="header-inner">
+    <div class="header-top">
+      <div class="brand">
+        <img src="assets/logo.png" alt="AppMi" class="brand-logo"/>
+        <div class="brand-text">
+          <span class="brand-name">AppMi Trainer</span>
+          <span class="brand-sub">Роботы-пылесосы</span>
+        </div>
+      </div>
+      <div class="brand-tabs" id="brandTabs">
+        <button class="brand-tab active" data-brand="dreame"><span class="tab-emoji">🤖</span> Dreame</button>
+        <button class="brand-tab" data-brand="roborock"><span class="tab-emoji">🔵</span> Roborock</button>
+        <button class="brand-tab" data-brand="dyson"><span class="tab-emoji">🌀</span> Dyson</button>
+      </div>
+    </div>
+    <div class="mode-tabs" id="modeTabs">
+      <button class="mode-tab active" data-mode="reference">📖 Справочник</button>
+      <button class="mode-tab" data-mode="practice">⚡ Практика</button>
+      <button class="mode-tab" data-mode="exam">🏆 Экзамен</button>
+    </div>
+  </div>
+</header>
+
+<!-- ═══ MAIN APP ═══ -->
+<div class="app">
+  <main class="main">
+
+    <!-- ══ VIEW: REFERENCE ══ -->
+    <div class="view active" id="view-reference">
+      <div class="section-tabs" id="sectionTabs">
+        <button class="section-tab active" data-section="series">🏷️ Линейки</button>
+        <button class="section-tab" data-section="hierarchy">📊 Иерархия</button>
+        <button class="section-tab" data-section="decoder">🔤 Имя модели</button>
+        <button class="section-tab" data-section="partnum">🔢 Партномер</button>
+        <button class="section-tab" data-section="suffixes">📌 Суффиксы</button>
+        <button class="section-tab" data-section="models">📋 Таблица</button>
+        <button class="section-tab" data-section="mistakes">⚠️ Ловушки</button>
+      </div>
+      <div id="referenceContent"></div>
+    </div>
+
+    <!-- ══ VIEW: PRACTICE ══ -->
+    <div class="view" id="view-practice">
+      <div class="practice-header">
+        <div class="topic-tabs" id="topicTabs">
+          <button class="topic-tab active" data-topic="all">Все темы</button>
+          <button class="topic-tab" data-topic="series">Линейки</button>
+          <button class="topic-tab" data-topic="suffixes">Суффиксы</button>
+          <button class="topic-tab" data-topic="partnumbers">Партномера</button>
+          <button class="topic-tab" data-topic="catalog">Каталог</button>
+          <button class="topic-tab" data-topic="mistakes">Ловушки</button>
+        </div>
+        <div class="progress-row">
+          <div class="progress-track"><div class="progress-fill" id="practiceProgressFill" style="width:0%"></div></div>
+          <span class="progress-label" id="practiceProgressLabel">0 / 0</span>
+        </div>
+      </div>
+      <div id="practiceContent"></div>
+    </div>
+
+    <!-- ══ VIEW: EXAM ══ -->
+    <div class="view" id="view-exam">
+      <div id="examContent"></div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Data sources -->
+<script src="data/dreame.js"></script>
+<script src="data/roborock.js"></script>
+<script src="data/dyson.js"></script>
+
+<script>
+/* ══════════════════════════════════════════════════════════════
+   STATE
+══════════════════════════════════════════════════════════════ */
+const BRANDS = { dreame: DREAME_KB, roborock: ROBOROCK_KB, dyson: DYSON_KB };
+const TOPIC_LABELS = { all:'Все', series:'Линейки', suffixes:'Суффиксы', partnumbers:'Партномера', catalog:'Каталог', mistakes:'Ловушки', identification:'Идентификация' };
+const SERIES_COLORS = {
+  'D':'#3b82f6','F':'#10b981','L':'#8b5cf6','X':'#ef4444','Aqua':'#06b6d4',
+  'E':'#a16207','Q':'#10b981','S':'#3b82f6','Qrevo':'#8b5cf6','Saros':'#ef4444',
+  '360Eye':'#6b7280','360Heurist':'#9ca3af','360VisNav':'#FF4713'
+};
+
+let state = {
+  brand: 'dreame',
+  mode: 'reference',
+  section: 'series',
+  topic: 'all',
+  practiceIdx: 0,
+  practiceAnswered: null,
+  practiceCorrect: 0,
+  practiceTotal: 0,
+  practiceQueue: [],
+  examActive: false,
+  examQuestions: [],
+  examAnswers: {},
+  examIdx: 0,
+  examTimer: null,
+  examTimeLeft: 0,
+  selectedSeries: null,
+  decoderActive: null,
+};
+
+function kb() { return BRANDS[state.brand]; }
+function save(k, v) { try { localStorage.setItem('appmi_'+k, JSON.stringify(v)); } catch(e){} }
+function load(k, def) { try { const v = localStorage.getItem('appmi_'+k); return v ? JSON.parse(v) : def; } catch(e){ return def; } }
+
+/* ══════════════════════════════════════════════════════════════
+   INIT
+══════════════════════════════════════════════════════════════ */
+function init() {
+  state.brand = load('brand','dreame');
+  state.mode  = load('mode','reference');
+  applyBrand();
+  applyMode();
+  bindGlobalNav();
+}
+
+function bindGlobalNav() {
+  document.getElementById('brandTabs').addEventListener('click', e => {
+    const btn = e.target.closest('[data-brand]');
+    if (!btn) return;
+    state.brand = btn.dataset.brand;
+    state.section = 'series';
+    state.selectedSeries = null;
+    state.decoderActive = null;
+    state.practiceQueue = [];
+    state.practiceIdx = 0;
+    _modelFilter = 'all';
+    save('brand', state.brand);
+    applyBrand();
+    renderCurrent();
+  });
+
+  document.getElementById('modeTabs').addEventListener('click', e => {
+    const btn = e.target.closest('[data-mode]');
+    if (!btn) return;
+    if (state.examActive && state.mode === 'exam') {
+      if (!confirm('Выйти из экзамена? Прогресс будет потерян.')) return;
+      clearInterval(state.examTimer);
+      state.examActive = false;
+    }
+    state.mode = btn.dataset.mode;
+    save('mode', state.mode);
+    applyMode();
+    renderCurrent();
+  });
+
+  document.getElementById('sectionTabs').addEventListener('click', e => {
+    const btn = e.target.closest('[data-section]');
+    if (!btn) return;
+    state.section = btn.dataset.section;
+    state.decoderActive = null;
+    renderReference();
+  });
+
+  document.getElementById('topicTabs').addEventListener('click', e => {
+    const btn = e.target.closest('[data-topic]');
+    if (!btn) return;
+    state.topic = btn.dataset.topic;
+    state.practiceQueue = getPracticeQueue();
+    state.practiceIdx = 0;
+    state.practiceAnswered = null;
+    state.practiceCorrect = 0;
+    renderPractice();
+  });
+}
+
+function applyBrand() {
+  document.querySelectorAll('[data-brand]').forEach(b => {
+    b.classList.toggle('active', b.dataset.brand === state.brand);
+  });
+}
+
+function applyMode() {
+  document.querySelectorAll('[data-mode]').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === state.mode);
+  });
+  document.querySelectorAll('.view').forEach(v => {
+    v.classList.toggle('active', v.id === 'view-'+state.mode);
+  });
+}
+
+function renderCurrent() {
+  if (state.mode === 'reference') renderReference();
+  else if (state.mode === 'practice') renderPractice();
+  else if (state.mode === 'exam') renderExam();
+}
+
+/* ══════════════════════════════════════════════════════════════
+   HELPERS
+══════════════════════════════════════════════════════════════ */
+function fmt(price) {
+  if (!price) return '—';
+  return price.toLocaleString('ru-RU') + ' ₽';
+}
+
+function stockIcon(item) {
+  if (!item.inStock && item.price === 0) return '<span class="stock-icon" title="Нет в наличии">⏳</span>';
+  if (item.inStock) return '<span class="stock-icon" title="В наличии">✅</span>';
+  return '<span class="stock-icon" title="Нет данных">❓</span>';
+}
+
+function catalogBadge(item) {
+  if (item.inOurCatalog) return '<span class="badge badge-green">✓ У нас</span>';
+  return '<span class="badge badge-gray">—</span>';
+}
+
+function newBadge(item) {
+  if (item.isNew) return '<span class="badge badge-new">NEW</span>';
+  return '';
+}
+
+function getSeriesColor(seriesId) {
+  return SERIES_COLORS[seriesId] || '#FFB800';
+}
+
+/* ══════════════════════════════════════════════════════════════
+   REFERENCE MODE
+══════════════════════════════════════════════════════════════ */
+function renderReference() {
+  // Update section tabs active state
+  const tabsEl = document.getElementById('sectionTabs');
+  tabsEl.querySelectorAll('[data-section]').forEach(t => {
+    t.classList.toggle('active', t.dataset.section === state.section);
+  });
+
+  // Render section
+  const content = document.getElementById('referenceContent');
+  if (state.section === 'series')     content.innerHTML = renderSeries();
+  else if (state.section === 'hierarchy') content.innerHTML = renderHierarchy();
+  else if (state.section === 'decoder')   content.innerHTML = renderDecoder();
+  else if (state.section === 'partnum')   content.innerHTML = renderPartnum();
+  else if (state.section === 'suffixes')  content.innerHTML = renderSuffixes();
+  else if (state.section === 'models')    content.innerHTML = renderModels();
+  else if (state.section === 'mistakes')  content.innerHTML = renderMistakes();
+
+  // Post-render bindings
+  if (state.section === 'series')    bindSeries();
+  if (state.section === 'hierarchy') bindHierarchy();
+  if (state.section === 'decoder')   bindDecoder();
+  if (state.section === 'models')    bindModels();
+}
+
+/* ── Series ── */
+function renderSeries() {
+  const data = kb();
+  const cards = data.series.map(s => {
+    const color = s.color || getSeriesColor(s.id);
+    return `
+    <div class="series-card" data-sid="${s.id}" style="--series-color:${color}">
+      <span class="series-emoji">${s.emoji}</span>
+      <div class="series-name">${s.name}</div>
+      <div class="series-price">${s.priceRange}</div>
+      <div class="series-desc">${s.positioning}</div>
+      <div class="series-models">
+        ${s.keyModels.slice(0,5).map(m => `<span class="model-chip">${m}</span>`).join('')}
+        ${s.keyModels.length > 5 ? `<span class="model-chip">+${s.keyModels.length-5}</span>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+
+  const dysonVs = data.vsComparison ? `
+  <div class="card card-accent" style="margin-top:24px">
+    <div class="section-title">⚖️ ${data.vsComparison.title}</div>
+    <div class="vs-table-wrapper">
+      <table class="vs-table">
+        <thead><tr><th>Аспект</th><th>Dyson 360 Vis Nav</th><th>Dreame / Roborock флагманы</th></tr></thead>
+        <tbody>${data.vsComparison.rows.map(r=>`<tr><td>${r.aspect}</td><td>${r.dyson}</td><td>${r.others}</td></tr>`).join('')}</tbody>
+      </table>
+    </div>
+    <div class="vs-insight"><strong>Вывод:</strong> ${data.vsComparison.keyInsight}</div>
+  </div>` : '';
+
+  return `
+  <div class="section-title">🏷️ Линейки ${data.brand}</div>
+  <div class="section-desc">Нажмите на карточку серии, чтобы увидеть подробнее о позиционировании.</div>
+  <div class="series-grid">${cards}</div>
+  <div id="seriesDetail"></div>
+  ${dysonVs}`;
+}
+
+function bindSeries() {
+  document.querySelectorAll('.series-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const sid = card.dataset.sid;
+      if (state.selectedSeries === sid) {
+        state.selectedSeries = null;
+        document.querySelectorAll('.series-card').forEach(c => c.classList.remove('selected'));
+        document.getElementById('seriesDetail').innerHTML = '';
+        return;
+      }
+      state.selectedSeries = sid;
+      document.querySelectorAll('.series-card').forEach(c => c.classList.toggle('selected', c.dataset.sid === sid));
+      const series = kb().series.find(s => s.id === sid);
+      const models = kb().catalog.filter(m => m.series === sid);
+      const color = series.color || getSeriesColor(sid);
+
+      const modelRows = models.map(m => `
+        <div class="hierarchy-item ${m.inOurCatalog?'in-catalog':''}">
+          <span class="hi-price">${m.price ? fmt(m.price) : m.inStock === false ? 'под заказ' : '—'}</span>
+          <span class="hi-name">${m.name}${m.color&&m.color!=='—'?' '+m.color:''}${m.region&&m.region!=='—'?' ['+m.region+']':''}</span>
+          <div class="hi-bar" style="display:none"></div>
+          <div class="hi-badge">${m.inOurCatalog?'<span class="badge badge-green">У нас</span>':m.isNew?'<span class="badge badge-new">NEW</span>':'<span class="badge badge-gray">—</span>'}</div>
+        </div>`).join('');
+
+      document.getElementById('seriesDetail').innerHTML = `
+        <div class="card" style="border-left:3px solid ${color}; margin-top:4px; animation: fadeIn 0.2s ease">
+          <div class="section-title">${series.emoji} ${series.name} — подробнее</div>
+          <p style="font-size:14px;color:var(--text-secondary);line-height:1.6;margin-bottom:16px">${series.positioning}</p>
+          ${models.length ? `<div style="margin-bottom:8px;font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Модели в каталоге</div><div class="hierarchy-list">${modelRows}</div>` : '<p style="color:var(--text-muted);font-size:13px">Модели не найдены в текущем прайсе.</p>'}
+        </div>`;
+    });
+  });
+}
+
+/* ── Hierarchy ── */
+function renderHierarchy() {
+  const data = kb();
+  const inStock = data.catalog.filter(m => m.price > 0).sort((a,b)=>a.price-b.price);
+  const noPrice = data.catalog.filter(m => m.price === 0);
+  const maxPrice = Math.max(...inStock.map(m=>m.price), 1);
+
+  const rows = inStock.map(m => {
+    const pct = Math.round((m.price / maxPrice) * 100);
+    return `
+    <div class="hierarchy-item ${m.inOurCatalog?'in-catalog':''}">
+      <span class="hi-price">${fmt(m.price)}</span>
+      <span class="hi-name">${m.name}${m.color&&m.color!=='—'?' <span style="color:var(--text-muted)">${m.color}</span>':''}${m.region&&m.region!=='—'?' <span style="color:var(--text-muted);font-size:11px">[${m.region}]</span>':''}</span>
+      <div class="hi-bar"><div class="hi-bar-fill" style="width:${pct}%"></div></div>
+      <div class="hi-badge">${m.inOurCatalog?'<span class="badge badge-green">✓ У нас</span>':m.isNew?'<span class="badge badge-new">NEW</span>':'<span class="badge badge-gray">—</span>'}</div>
+    </div>`;
+  }).join('');
+
+  const noRows = noPrice.map(m => `
+    <div class="hierarchy-item">
+      <span class="hi-price" style="color:var(--text-muted)">под заказ</span>
+      <span class="hi-name">${m.name}${m.color&&m.color!=='—'?' <span style="color:var(--text-muted)">${m.color}</span>':''}</span>
+      <div class="hi-bar"></div>
+      <div class="hi-badge"><span class="badge badge-gray">⏳</span></div>
+    </div>`).join('');
+
+  return `
+  <div class="section-title">📊 Иерархия моделей ${kb().brand}</div>
+  <div class="section-desc">Все модели с ценами — от доступной к топовой. Зелёная полоска слева = есть в нашем каталоге.</div>
+  <div class="hierarchy-section">
+    <div class="hierarchy-list">${rows}</div>
+    ${noPrice.length ? `
+    <div style="margin-top:16px;margin-bottom:8px;font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px">Нет в наличии / под заказ</div>
+    <div class="hierarchy-list">${noRows}</div>` : ''}
+  </div>`;
+}
+
+function bindHierarchy() {}
+
+/* ── Decoder ── */
+function renderDecoder() {
+  const data = kb();
+  // Build example name parts based on brand
+  let parts;
+  if (data.brandKey === 'dreame') {
+    parts = [
+      { text:'L',     label:'Серия',    meaning:'Серия', explain:'L-серия — средний и верхне-средний класс. D — базовая, X — флагманы, F — доступная, Aqua — роликовая мойка.' },
+      { text:'50',    label:'Поколение',meaning:'Позиция', explain:'Число обозначает позицию в линейке. Выше = новее и дороже в рамках серии: L40 < L50 < L60.' },
+      { text:'s',     label:'Апгрейд',  meaning:'Строчная s', explain:'«s» = обновлённая версия в поколении. L40S > L40, L50S > L50. Улучшения: щётка, навигация, станция.' },
+      { text:'Pro',   label:'Версия',   meaning:'Pro', explain:'Pro = улучшенная версия базовой модели. Выше базовой, но ниже Ultra в той же линейке.' },
+      { text:'Ultra', label:'Станция',  meaning:'Ultra', explain:'Ultra = полная станция самообслуживания: автосбор пыли, мойка и сушка швабры, автодолив воды.' },
+      { text:'CE',    label:'Регион',   meaning:'Сертификат', explain:'CE = европейская сертификация. Разные регионы (CE, AE, EU) = разные партномера и цены!' },
+      { text:'White', label:'Цвет',     meaning:'Цвет корпуса', explain:'White / Black / Grey — цвет корпуса. Не влияет на характеристики. Одинаковый партномер.' },
+    ];
+  } else if (data.brandKey === 'roborock') {
+    parts = [
+      { text:'Qrevo',  label:'Линейка',  meaning:'Линейка', explain:'Qrevo — средний и высокий класс с Multifunctional Dock. Saros — флагманы. Q — доступный с LiDAR.' },
+      { text:'Edge',   label:'Подсерия', meaning:'Технология', explain:'Edge — акцент на преодолении порогов и тонком корпусе. Curv — AdaptiLift. Flow — SpiraFlow.' },
+      { text:'2',      label:'Поколение',meaning:'Поколение', explain:'Цифра = номер поколения. Qrevo 2 — новее и лучше первого Qrevo.' },
+      { text:'Pro',    label:'Версия',   meaning:'Pro', explain:'Pro = усиленная версия: большая мощность, улучшенная щётка или станция.' },
+      { text:'CE',     label:'Регион',   meaning:'Сертификат', explain:'CE = европейская сертификация. Влияет на доступные функции и язык приложения.' },
+    ];
+  } else {
+    parts = [
+      { text:'360',     label:'Серия',      meaning:'Серия', explain:'Все роботы-пылесосы Dyson — серия «360». Означает 360° навигацию.' },
+      { text:'Vis',     label:'Технология', meaning:'Visual', explain:'Vis = Visual — визуальная навигация через 360° панорамную камеру.' },
+      { text:'Nav',     label:'Навигация',  meaning:'Navigation', explain:'Nav = Navigation — SLAM-картографирование + 26 датчиков. Вместе: Vis Nav = Visual Navigation.' },
+      { text:'Blue/',   label:'Цвет 1',     meaning:'Первый цвет', explain:'Первый цвет корпуса. Blue — синий основной.' },
+      { text:'Nickel',  label:'Цвет 2',     meaning:'Второй цвет', explain:'Второй цвет акцента (Nickel = никелевый, Prussian Blue = тёмно-синий). Только косметика!' },
+    ];
+  }
+
+  const partsHtml = parts.map((p,i) => `
+    <div class="decoder-part ${state.decoderActive===i?'active':''}" data-idx="${i}">
+      <div class="part-text">${p.text}</div>
+      <div class="part-label">${p.label}</div>
+    </div>`).join('');
+
+  const tooltipHtml = state.decoderActive !== null ? `
+    <div class="decoder-tooltip visible">
+      <div class="decoder-tooltip-title">${parts[state.decoderActive].text} → ${parts[state.decoderActive].meaning}</div>
+      <div class="decoder-tooltip-text">${parts[state.decoderActive].explain}</div>
+    </div>` : `
+    <div class="decoder-tooltip">
+      <div class="decoder-tooltip-text">👆 Нажмите на любой элемент имени чтобы узнать что он означает</div>
+    </div>`;
+
+  return `
+  <div class="section-title">🔤 Как читать имя модели</div>
+  <div class="section-desc">Нажмите на любую часть названия — получите объяснение что она означает.</div>
+  <div class="decoder-section">
+    <div class="decoder-box">
+      <div class="decoder-name">${partsHtml}</div>
+      <div id="decoderTooltip">${tooltipHtml}</div>
+    </div>
+  </div>`;
+}
+
+function bindDecoder() {
+  const container = document.getElementById('referenceContent');
+  if (!container) return;
+  container.querySelectorAll('.decoder-part').forEach(el => {
+    el.onclick = () => {
+      const idx = +el.dataset.idx;
+      state.decoderActive = state.decoderActive === idx ? null : idx;
+      container.innerHTML = renderDecoder();
+      bindDecoder();
+    };
+  });
+}
+
+/* ── Partnum ── */
+function renderPartnum() {
+  const pg = kb().partnumberGuide;
+  const partsHtml = pg.parts.map(p => `
+    <div class="partnum-part-row">
+      <span class="pp-chars">${p.chars}</span>
+      <span class="pp-meaning">${p.meaning}</span>
+    </div>`).join('');
+
+  const examplesHtml = pg.examples.map(e => `
+    <div class="pn-ex">
+      <span class="pn-ex-code">${e.partnum}</span>
+      <span class="pn-ex-info"><strong>${e.model}</strong> — ${e.note}</span>
+    </div>`).join('');
+
+  const checkHtml = pg.checkList ? pg.checkList.map(c => `
+    <div style="display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px;color:var(--text-secondary)">
+      <span style="color:var(--accent)">✓</span><span>${c}</span>
+    </div>`).join('') : '';
+
+  return `
+  <div class="section-title">🔢 Как читать партномер ${kb().brand}</div>
+  <div class="section-desc">Код на нижней наклейке устройства — единственный надёжный способ точно идентифицировать модель.</div>
+  <div class="partnum-guide">
+    <div class="partnum-example">${pg.example}</div>
+    <div class="partnum-parts">${partsHtml}</div>
+    <div class="key-rule">⚠️ ${pg.keyRule}</div>
+    ${pg.examples.length ? `<div style="margin-top:16px;font-size:12px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">Примеры</div><div class="partnum-examples">${examplesHtml}</div>` : ''}
+  </div>
+  ${pg.checkList ? `<div class="card" style="margin-top:16px"><div class="section-title" style="margin-bottom:12px">✅ Что сверять перед заказом</div>${checkHtml}</div>` : ''}`;
+}
+
+/* ── Suffixes ── */
+function renderSuffixes() {
+  const rows = kb().suffixes.map(s => `
+    <div class="suffix-row">
+      <div class="suffix-tag">${s.suffix}</div>
+      <div class="suffix-info">
+        <div class="suffix-meaning">${s.meaning}</div>
+        <div class="suffix-example">Пример: ${s.example}</div>
+      </div>
+    </div>`).join('');
+
+  return `
+  <div class="section-title">📌 Суффиксы ${kb().brand}</div>
+  <div class="section-desc">Каждый суффикс в официальном названии несёт конкретный смысл — это не маркетинговые слова.</div>
+  <div class="suffix-grid">${rows}</div>`;
+}
+
+/* ── Models table ── */
+let _modelFilter = 'all';
+function renderModels() {
+  const data = kb();
+  const series = ['all', ...new Set(data.catalog.map(m=>m.series))];
+  const filters = series.map(s => `<option value="${s}">${s==='all'?'Все серии':s}</option>`).join('');
+
+  const filtered = _modelFilter === 'all' ? data.catalog : data.catalog.filter(m=>m.series===_modelFilter);
+
+  const rows = filtered.map(m => {
+    const c = getSeriesColor(m.series);
+    return `<tr>
+      <td class="td-name">${m.name}${m.isNew?' <span class="badge badge-new" style="margin-left:4px">NEW</span>':''}</td>
+      <td class="td-series"><span style="background:${c}22;color:${c};padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700">${m.series}</span></td>
+      <td>${m.suffixes.length ? m.suffixes.join(' + ') : '—'}</td>
+      <td>${m.region||'—'}</td>
+      <td>${m.color&&m.color!=='—'?m.color:'—'}</td>
+      <td class="td-partnum">${m.partnum||'—'}</td>
+      <td class="td-price ${m.price?'':'no-price'}">${m.price?fmt(m.price):'под заказ'}</td>
+      <td>${catalogBadge(m)}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+  <div class="section-title">📋 Таблица моделей ${data.brand}</div>
+  <div class="table-toolbar">
+    <div class="table-filter">
+      <label for="seriesFilter" style="font-size:12px;color:var(--text-muted)">Серия:</label>
+      <select class="filter-select" id="seriesFilter">${filters}</select>
+    </div>
+    <span style="font-size:12px;color:var(--text-muted)">${filtered.length} моделей</span>
+  </div>
+  <div class="table-wrapper">
+    <table class="model-table">
+      <thead><tr><th>Модель</th><th>Серия</th><th>Суффиксы</th><th>Регион</th><th>Цвет</th><th>Партномер</th><th>Цена</th><th>У нас</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+function bindModels() {
+  const sel = document.getElementById('seriesFilter');
+  if (sel) {
+    sel.value = _modelFilter;
+    sel.onchange = () => {
+      _modelFilter = sel.value;
+      document.getElementById('referenceContent').innerHTML = renderModels();
+      bindModels();
+    };
+  }
+}
+
+/* ── Mistakes ── */
+function renderMistakes() {
+  const cards = kb().commonMistakes.map(m => `
+    <div class="mistake-card">
+      <div class="mistake-wrong">
+        <span class="mistake-wrong-icon">❌</span>
+        <span class="mistake-wrong-text">${m.mistake}</span>
+      </div>
+      <div class="mistake-correct">
+        <span class="mistake-correct-icon">✅</span>
+        <span class="mistake-correct-text">${m.correct}</span>
+      </div>
+    </div>`).join('');
+
+  return `
+  <div class="section-title">⚠️ Типичные ошибки: ${kb().brand}</div>
+  <div class="section-desc">Частые ошибки менеджеров при идентификации и консультации. Изучите и не повторяйте!</div>
+  <div class="mistakes-grid">${cards}</div>`;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   PRACTICE MODE
+══════════════════════════════════════════════════════════════ */
+function getPracticeQueue() {
+  let q = kb().quiz;
+  if (state.topic !== 'all') q = q.filter(x => x.topic === state.topic || x.topic === state.topic.replace('catalog','catalog').replace('mistakes','mistakes'));
+  // Shuffle
+  return [...q].sort(() => Math.random()-0.5);
+}
+
+function renderPractice() {
+  // Update topic tabs active state
+  document.querySelectorAll('.topic-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.topic === state.topic);
+  });
+
+  if (!state.practiceQueue.length) {
+    state.practiceQueue = getPracticeQueue();
+    state.practiceIdx = 0;
+    state.practiceAnswered = null;
+    state.practiceCorrect = 0;
+  }
+
+  const q = state.practiceQueue;
+  const idx = state.practiceIdx;
+  const total = q.length;
+
+  // Progress
+  const pct = total ? Math.round((idx/total)*100) : 0;
+  document.getElementById('practiceProgressFill').style.width = pct+'%';
+  document.getElementById('practiceProgressLabel').textContent = idx+' / '+total;
+
+  if (!total) {
+    document.getElementById('practiceContent').innerHTML = `<div class="empty-state"><span class="empty-emoji">🔍</span>Нет вопросов по выбранной теме</div>`;
+    return;
+  }
+
+  if (idx >= total) {
+    // Completed!
+    const pct2 = Math.round((state.practiceCorrect/total)*100);
+    document.getElementById('practiceProgressFill').style.width = '100%';
+    document.getElementById('practiceProgressLabel').textContent = total+' / '+total;
+    document.getElementById('practiceContent').innerHTML = `
+      <div class="results-score">
+        <span class="results-emoji">${pct2>=80?'🎉':'💪'}</span>
+        <div class="results-grade">${pct2}%</div>
+        <div class="results-label">Правильных ответов: ${state.practiceCorrect} из ${total}</div>
+        <div style="margin-top:16px">${pct2>=80?'<span class="results-pass">Отличный результат!</span>':'<span style="color:var(--wrong)">Повторите материал в Справочнике</span>'}</div>
+      </div>
+      <div style="text-align:center;margin-top:16px"><button class="btn btn-primary" id="restartPractice">🔄 Начать заново</button></div>`;
+    document.getElementById('restartPractice').onclick = () => {
+      state.practiceQueue = getPracticeQueue();
+      state.practiceIdx = 0; state.practiceAnswered = null; state.practiceCorrect = 0;
+      renderPractice();
+    };
+    return;
+  }
+
+  const question = q[idx];
+  const answered = state.practiceAnswered;
+
+  const optionsHtml = question.options.map((opt, i) => {
+    let cls = 'option-label';
+    if (answered !== null) {
+      cls += ' disabled';
+      if (i === question.answer) cls += ' correct';
+      else if (i === answered && i !== question.answer) cls += ' wrong';
+    }
+    return `<label class="${cls}">
+      <input type="radio" name="q" value="${i}"/>
+      <div class="option-circle"></div>
+      <span>${opt}</span>
+    </label>`;
+  }).join('');
+
+  const explainHtml = answered !== null ? `
+    <div class="explanation-panel visible">
+      <div class="explanation-label">💡 Объяснение</div>
+      <div class="explanation-text">${question.explain}</div>
+    </div>` : `<div class="explanation-panel"></div>`;
+
+  const topicLabel = TOPIC_LABELS[question.topic] || question.topic;
+
+  document.getElementById('practiceContent').innerHTML = `
+    <div class="question-card">
+      <div class="question-meta">
+        <span class="q-topic-badge">${topicLabel}</span>
+        <span class="q-difficulty ${question.difficulty}">${question.difficulty==='easy'?'Лёгкий':question.difficulty==='medium'?'Средний':'Сложный'}</span>
+        <span style="font-size:12px;color:var(--text-muted);margin-left:auto">${idx+1} / ${total}</span>
+      </div>
+      <div class="question-text">${question.prompt}</div>
+      <div class="options-list">${optionsHtml}</div>
+      ${explainHtml}
+    </div>
+    <div class="question-actions">
+      ${answered !== null
+        ? `<button class="btn btn-primary" id="nextQ">Следующий →</button>`
+        : `<button class="btn btn-primary" id="checkQ" disabled>Проверить</button>`}
+      <button class="btn btn-ghost" id="skipQ">Пропустить</button>
+    </div>`;
+
+  // Bind options
+  document.querySelectorAll('.option-label').forEach(lbl => {
+    if (answered !== null) return;
+    lbl.addEventListener('click', () => {
+      document.querySelectorAll('.option-label').forEach(l=>l.classList.remove('selected'));
+      lbl.classList.add('selected');
+      document.getElementById('checkQ').disabled = false;
+      document.getElementById('checkQ').dataset.selected = lbl.querySelector('input').value;
+    });
+  });
+
+  if (answered === null) {
+    document.getElementById('checkQ').addEventListener('click', () => {
+      const sel = +document.getElementById('checkQ').dataset.selected;
+      state.practiceAnswered = sel;
+      if (sel === question.answer) state.practiceCorrect++;
+      renderPractice();
+    });
+    document.getElementById('skipQ').addEventListener('click', () => {
+      state.practiceIdx++;
+      state.practiceAnswered = null;
+      renderPractice();
+    });
+  } else {
+    document.getElementById('nextQ').addEventListener('click', () => {
+      state.practiceIdx++;
+      state.practiceAnswered = null;
+      renderPractice();
+    });
+    document.getElementById('skipQ').addEventListener('click', () => {
+      state.practiceIdx++;
+      state.practiceAnswered = null;
+      renderPractice();
+    });
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   EXAM MODE
+══════════════════════════════════════════════════════════════ */
+const EXAM_Q_COUNT = 20;
+const EXAM_DURATION = 15 * 60; // 15 min
+
+function renderExam() {
+  const content = document.getElementById('examContent');
+  if (!state.examActive) {
+    // Show start screen
+    const history = load('examHistory_'+state.brand, []);
+    const historyHtml = history.length ? `
+      <div style="margin-top:24px">
+        <div style="font-size:14px;font-weight:700;margin-bottom:12px;color:var(--text-secondary)">История экзаменов (${kb().brand})</div>
+        <div class="history-list">
+          ${history.slice().reverse().slice(0,5).map(h=>`
+          <div class="history-item">
+            <span style="color:var(--text-secondary);font-size:12px">${h.date}</span>
+            <span>${h.correct} / ${h.total} правильных</span>
+            <span class="hi-score-val ${h.pct>=70?'pass':'fail'}">${h.pct}% ${h.pct>=70?'✓':'✗'}</span>
+          </div>`).join('')}
+        </div>
+      </div>` : '';
+
+    content.innerHTML = `
+      <div class="results-score" style="max-width:480px;margin:0 auto">
+        <span class="results-emoji">🏆</span>
+        <div style="font-size:22px;font-weight:800;margin-bottom:8px">Экзамен — ${kb().brand}</div>
+        <div style="font-size:14px;color:var(--text-secondary);line-height:1.6;margin-bottom:24px">
+          ${EXAM_Q_COUNT} случайных вопросов из всех тем.<br/>
+          Таймер: 15 минут. Без подсказок до финала.
+        </div>
+        <button class="btn btn-primary" id="startExam" style="font-size:16px;padding:14px 32px">▶ Начать экзамен</button>
+      </div>
+      ${historyHtml}`;
+    document.getElementById('startExam').onclick = startExam;
+    return;
+  }
+
+  renderExamQuestion();
+}
+
+function startExam() {
+  const all = [...kb().quiz].sort(()=>Math.random()-0.5);
+  state.examQuestions = all.slice(0, Math.min(EXAM_Q_COUNT, all.length));
+  state.examAnswers = {};
+  state.examIdx = 0;
+  state.examActive = true;
+  state.examTimeLeft = EXAM_DURATION;
+
+  clearInterval(state.examTimer);
+  state.examTimer = setInterval(() => {
+    state.examTimeLeft--;
+    const timerEl = document.getElementById('examTimerVal');
+    if (timerEl) timerEl.textContent = formatTime(state.examTimeLeft);
+    if (state.examTimeLeft <= 60) {
+      document.getElementById('examTimerBox')?.classList.add('pulse');
+    }
+    if (state.examTimeLeft <= 0) {
+      clearInterval(state.examTimer);
+      finishExam();
+    }
+  }, 1000);
+
+  renderExamQuestion();
+}
+
+function formatTime(sec) {
+  const m = Math.floor(sec/60), s = sec%60;
+  return `${m}:${s.toString().padStart(2,'0')}`;
+}
+
+function renderExamQuestion() {
+  const content = document.getElementById('examContent');
+  const q = state.examQuestions;
+  const idx = state.examIdx;
+  const answered = state.examAnswers[idx];
+
+  const navCells = q.map((_,i) => {
+    let cls = 'exam-nav-cell';
+    if (state.examAnswers[i] !== undefined) cls += ' answered';
+    if (i === idx) cls += ' current';
+    return `<div class="${cls}" data-examnav="${i}">${i+1}</div>`;
+  }).join('');
+
+  const optionsHtml = q[idx].options.map((opt,i) => `
+    <label class="option-label${answered!==undefined?' disabled':''}">
+      <input type="radio" name="examq" value="${i}" ${answered===i?'checked':''}/>
+      <div class="option-circle ${answered===i?'selected':''}"></div>
+      <span>${opt}</span>
+    </label>`).join('');
+
+  content.innerHTML = `
+    <div class="exam-hud" id="examHud">
+      <div class="exam-timer" id="examTimerBox">⏱ <span id="examTimerVal">${formatTime(state.examTimeLeft)}</span></div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <span style="font-size:13px;color:var(--text-secondary)">${Object.keys(state.examAnswers).length} / ${q.length} отвечено</span>
+        <button class="btn btn-secondary" id="submitExamBtn" style="font-size:13px;padding:7px 16px">Завершить</button>
+      </div>
+    </div>
+    <div class="exam-nav-grid">${navCells}</div>
+    <div class="question-card">
+      <div class="question-meta">
+        <span class="q-topic-badge">${TOPIC_LABELS[q[idx].topic]||q[idx].topic}</span>
+        <span style="font-size:12px;color:var(--text-muted);margin-left:auto">Вопрос ${idx+1} из ${q.length}</span>
+      </div>
+      <div class="question-text">${q[idx].prompt}</div>
+      <div class="options-list">${optionsHtml}</div>
+    </div>
+    <div class="question-actions">
+      <button class="btn btn-secondary" id="examPrev" ${idx===0?'disabled':''}>← Назад</button>
+      <button class="btn btn-primary" id="examNext">${idx===q.length-1?'К результатам':'Вперёд →'}</button>
+    </div>`;
+
+  // Nav cells
+  document.querySelectorAll('[data-examnav]').forEach(cell => {
+    cell.addEventListener('click', () => {
+      state.examIdx = +cell.dataset.examnav;
+      renderExamQuestion();
+    });
+  });
+
+  // Options
+  document.querySelectorAll('.option-label').forEach(lbl => {
+    lbl.addEventListener('click', () => {
+      state.examAnswers[idx] = +lbl.querySelector('input').value;
+      renderExamQuestion();
+    });
+  });
+
+  document.getElementById('examPrev').onclick = () => { if(idx>0){state.examIdx--; renderExamQuestion();} };
+  document.getElementById('examNext').onclick = () => {
+    if (idx < q.length-1) { state.examIdx++; renderExamQuestion(); }
+    else { if(confirm('Завершить экзамен?')) finishExam(); }
+  };
+  document.getElementById('submitExamBtn').onclick = () => { if(confirm('Завершить экзамен?')) finishExam(); };
+}
+
+function finishExam() {
+  clearInterval(state.examTimer);
+  state.examActive = false;
+  const q = state.examQuestions;
+  let correct = 0;
+  q.forEach((question,i) => { if(state.examAnswers[i]===question.answer) correct++; });
+  const pct = Math.round((correct/q.length)*100);
+  const pass = pct >= 70;
+
+  // Save history
+  const history = load('examHistory_'+state.brand, []);
+  history.push({
+    date: new Date().toLocaleDateString('ru-RU', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}),
+    correct, total: q.length, pct
+  });
+  save('examHistory_'+state.brand, history.slice(-10));
+
+  const reviewHtml = q.map((question, i) => {
+    const isCorrect = state.examAnswers[i] === question.answer;
+    const userAnswer = state.examAnswers[i];
+    return `
+    <div class="review-item ${isCorrect?'correct':'wrong'}">
+      <div class="review-q">${i+1}. ${question.prompt}</div>
+      <div class="review-answer ${isCorrect?'correct':'wrong'}">
+        ${isCorrect ? '✓ Верно' : '✗ Ваш ответ: ' + (userAnswer!==undefined ? question.options[userAnswer] : 'Не отвечено')}
+      </div>
+      ${!isCorrect ? `<div class="review-answer correct">✓ Правильно: ${question.options[question.answer]}</div>` : ''}
+      <div class="review-explain">${question.explain}</div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('examContent').innerHTML = `
+    <div class="exam-results">
+      <div class="results-score">
+        <span class="results-emoji">${pct>=90?'🎉':pct>=70?'👍':'💪'}</span>
+        <div class="results-grade ${pass?'results-pass':'results-fail'}">${pct}%</div>
+        <div class="results-label">Правильных: ${correct} из ${q.length} · ${pass?'<span class="results-pass">Сдан</span>':'<span class="results-fail">Не сдан</span>'}</div>
+      </div>
+      <div class="stats-row">
+        <div class="stat-card"><span class="stat-val" style="color:var(--correct)">${correct}</span><span class="stat-lbl">Верно</span></div>
+        <div class="stat-card"><span class="stat-val" style="color:var(--wrong)">${q.length-correct}</span><span class="stat-lbl">Ошибок</span></div>
+        <div class="stat-card"><span class="stat-val" style="color:var(--accent)">${pct}%</span><span class="stat-lbl">Результат</span></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-bottom:24px;flex-wrap:wrap">
+        <button class="btn btn-primary" id="retakeExam">🔄 Пересдать</button>
+        <button class="btn btn-secondary" id="backToRef">📖 Справочник</button>
+      </div>
+      <div style="font-size:15px;font-weight:700;margin-bottom:16px">Разбор ошибок</div>
+      <div class="review-list">${reviewHtml}</div>
+    </div>`;
+
+  document.getElementById('retakeExam').onclick = () => { state.examActive=false; renderExam(); };
+  document.getElementById('backToRef').onclick = () => {
+    state.mode='reference'; save('mode',state.mode);
+    applyMode(); renderReference();
+  };
+}
+
+/* ══════════════════════════════════════════════════════════════
+   BOOT
+══════════════════════════════════════════════════════════════ */
+document.addEventListener('DOMContentLoaded', () => {
+  init();
+  renderCurrent();
+});
+</script>
+</body>
+</html>
